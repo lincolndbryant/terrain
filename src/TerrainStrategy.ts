@@ -20,7 +20,7 @@ export const earthStrategy: TerrainStrategy = {
   defaultViewDistance: 50,
   roughness: 0.85,
   metalness: 0.0,
-  buildingPadColor: [0.52, 0.5, 0.46],
+  buildingPadColor: [0.55, 0.55, 0.55],
   colorForHeight: (h) => {
     if (h < -1.5) {
       return [0.18, 0.35, 0.56]; // deep water

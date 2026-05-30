@@ -1,5 +1,22 @@
-import { sampleBaseHeight, sampleTerrainHeight } from "./terrainHeight";
+import { sampleTerrainHeight } from "./terrainHeight";
 import { BUILDING_PAD_CELL_SIZE, BUILDING_PAD_PROBABILITY } from "./constants";
+
+export type PadFloor = {
+  cx: number;
+  cz: number;
+  hw: number;
+  hd: number;
+  height: number;
+};
+
+export type PadStep = {
+  cx: number;
+  cy: number;
+  cz: number;
+  hw: number;
+  hh: number;
+  hd: number;
+};
 
 type Pad = {
   centerX: number;
@@ -7,6 +24,50 @@ type Pad = {
   halfW: number;
   halfD: number;
   height: number;
+  steps: PadStep[];
+};
+
+const STEP_COUNT = 4;
+const STEP_BASE_H = 0.55;
+const STEP_RISE = 0.65;
+const STEP_HALF_DEPTH = 0.8;
+const STEP_HALF_WIDTH = 1.1;
+const STEP_SPACING = STEP_HALF_DEPTH * 2 + 0.45;
+
+const computeSteps = (
+  padCX: number,
+  padCZ: number,
+  padHeight: number,
+  padHalfW: number,
+  padHalfD: number,
+  seed: number,
+): PadStep[] => {
+  const dirIdx = seed & 3;
+  const moveDX = dirIdx === 0 ? 1 : dirIdx === 1 ? -1 : 0;
+  const moveDZ = dirIdx === 2 ? 1 : dirIdx === 3 ? -1 : 0;
+  const startOffX = (((seed >>> 8) & 0x7f) / 127 - 0.5) * padHalfW * 0.5;
+  const startOffZ = (((seed >>> 16) & 0x7f) / 127 - 0.5) * padHalfD * 0.5;
+  const steps: PadStep[] = [];
+  for (let i = 0; i < STEP_COUNT; i++) {
+    const stepH = STEP_BASE_H + i * STEP_RISE;
+    const cx = padCX + startOffX + moveDX * i * STEP_SPACING;
+    const cz = padCZ + startOffZ + moveDZ * i * STEP_SPACING;
+    if (
+      Math.abs(cx - padCX) > padHalfW - STEP_HALF_DEPTH ||
+      Math.abs(cz - padCZ) > padHalfD - STEP_HALF_DEPTH
+    ) {
+      break;
+    }
+    steps.push({
+      cx,
+      cy: padHeight + stepH / 2,
+      cz,
+      hw: moveDX !== 0 ? STEP_HALF_DEPTH : STEP_HALF_WIDTH,
+      hh: stepH / 2,
+      hd: moveDZ !== 0 ? STEP_HALF_DEPTH : STEP_HALF_WIDTH,
+    });
+  }
+  return steps;
 };
 
 const uint32Hash = (a: number, b: number): number => {
@@ -31,6 +92,7 @@ const getPadForCell = (cellX: number, cellZ: number): Pad | null => {
   }
   const h1 = uint32Hash(cellX ^ 0xabcd, cellZ ^ 0x1234);
   const h2 = uint32Hash(cellX ^ 0x5678, cellZ ^ 0xef01);
+  const h3 = uint32Hash(cellX ^ 0x2345, cellZ ^ 0x6789);
   const margin = 30;
   const range = BUILDING_PAD_CELL_SIZE - 2 * margin;
   const offsetX = margin + ((h1 >>> 16) / 0xffff) * range;
@@ -39,10 +101,33 @@ const getPadForCell = (cellX: number, cellZ: number): Pad | null => {
   const centerZ = cellZ * BUILDING_PAD_CELL_SIZE + offsetZ;
   const halfW = 20 + ((h2 >>> 24) / 255) * 35;
   const halfD = 15 + (((h2 >>> 16) & 0xff) / 255) * 25;
-  const height = sampleBaseHeight(centerX, centerZ);
-  const pad: Pad = { centerX, centerZ, halfW, halfD, height };
+  const height = sampleTerrainHeight(centerX, centerZ);
+  const steps = computeSteps(centerX, centerZ, height, halfW, halfD, h3);
+  const pad: Pad = { centerX, centerZ, halfW, halfD, height, steps };
   padCache.set(key, pad);
   return pad;
+};
+
+export const getPadsInRegion = (
+  minX: number,
+  minZ: number,
+  maxX: number,
+  maxZ: number,
+): Pad[] => {
+  const x0 = Math.floor(minX / BUILDING_PAD_CELL_SIZE);
+  const x1 = Math.floor(maxX / BUILDING_PAD_CELL_SIZE);
+  const z0 = Math.floor(minZ / BUILDING_PAD_CELL_SIZE);
+  const z1 = Math.floor(maxZ / BUILDING_PAD_CELL_SIZE);
+  const result: Pad[] = [];
+  for (let cx = x0; cx <= x1; cx++) {
+    for (let cz = z0; cz <= z1; cz++) {
+      const pad = getPadForCell(cx, cz);
+      if (pad) {
+        result.push(pad);
+      }
+    }
+  }
+  return result;
 };
 
 export const getPadAtPoint = (worldX: number, worldZ: number): Pad | null => {

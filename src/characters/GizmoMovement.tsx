@@ -2,19 +2,21 @@ import { useRef, useEffect, RefObject } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { OrbitControls as OrbitControlsBase } from "three-stdlib";
+import { useRapier } from "@react-three/rapier";
+import type { RapierRigidBody } from "@react-three/rapier";
 import {
   CAMERA_TARGET_HEIGHT,
   KEYBOARD_MOVE_SPEED,
   KEYBOARD_TURN_SPEED,
 } from "../constants";
-import { sampleGroundHeight } from "../buildingPads";
 
-const JUMP_SPEED = 7;
-const GRAVITY = 20;
+const JUMP_SPEED = 10;
+const GRAVITY = 30;
 
 type Props = {
   controlsRef: RefObject<OrbitControlsBase | null>;
   gizmoRef: RefObject<THREE.Group | null>;
+  bodyRef: RefObject<RapierRigidBody | null>;
   movingRef: RefObject<boolean>;
   jumpingRef: RefObject<boolean>;
 };
@@ -22,18 +24,36 @@ type Props = {
 const GizmoMovement = ({
   controlsRef,
   gizmoRef,
+  bodyRef,
   movingRef,
   jumpingRef,
 }: Props): null => {
   const { camera } = useThree();
+  const { world } = useRapier();
   const keys = useRef<Record<string, boolean>>({});
   const fwd = useRef(new THREE.Vector3());
-  const move = useRef(new THREE.Vector3());
-  const offset = useRef(new THREE.Vector3());
+  const offsetVec = useRef(new THREE.Vector3());
   const yAxis = useRef(new THREE.Vector3(0, 1, 0));
-  const jumpVel = useRef(0);
-  const jumpY = useRef(0);
+  const yVelRef = useRef(0);
+  const wasGroundedRef = useRef(false);
   const spaceConsumed = useRef(false);
+  const controllerRef = useRef<ReturnType<
+    typeof world.createCharacterController
+  > | null>(null);
+
+  useEffect(() => {
+    const controller = world.createCharacterController(0.04);
+    controller.enableSnapToGround(0.4);
+    controller.setApplyImpulsesToDynamicBodies(true);
+    controller.enableAutostep(0.5, 0.2, true);
+    controller.setMaxSlopeClimbAngle((55 * Math.PI) / 180);
+    controller.setMinSlopeSlideAngle((35 * Math.PI) / 180);
+    controllerRef.current = controller;
+    return () => {
+      controller.free();
+      controllerRef.current = null;
+    };
+  }, [world]);
 
   useEffect(() => {
     const dn = (e: KeyboardEvent) => {
@@ -55,73 +75,94 @@ const GizmoMovement = ({
 
   useFrame((_, delta) => {
     const controls = controlsRef.current;
-    if (!controls) {
+    const body = bodyRef.current;
+    const controller = controllerRef.current;
+    if (!controls || !body || !controller) {
       return;
     }
     const k = keys.current;
 
+    // --- Turn ---
     if (k["ArrowLeft"] || k["ArrowRight"]) {
       const angle = k["ArrowLeft"] ? KEYBOARD_TURN_SPEED : -KEYBOARD_TURN_SPEED;
-      offset.current.subVectors(camera.position, controls.target);
-      offset.current.applyAxisAngle(yAxis.current, angle);
-      camera.position.copy(controls.target).add(offset.current);
+      offsetVec.current.subVectors(camera.position, controls.target);
+      offsetVec.current.applyAxisAngle(yAxis.current, angle);
+      camera.position.copy(controls.target).add(offsetVec.current);
     }
 
     camera.getWorldDirection(fwd.current);
     fwd.current.y = 0;
     fwd.current.normalize();
 
-    move.current.set(0, 0, 0);
+    // --- XZ movement ---
+    const speed =
+      k["ShiftLeft"] || k["ShiftRight"]
+        ? KEYBOARD_MOVE_SPEED * 2
+        : KEYBOARD_MOVE_SPEED;
+    let dx = 0;
+    let dz = 0;
     if (k["ArrowUp"]) {
-      move.current.addScaledVector(fwd.current, KEYBOARD_MOVE_SPEED);
+      dx += fwd.current.x * speed;
+      dz += fwd.current.z * speed;
     }
     if (k["ArrowDown"]) {
-      move.current.addScaledVector(fwd.current, -KEYBOARD_MOVE_SPEED);
+      dx -= fwd.current.x * speed;
+      dz -= fwd.current.z * speed;
     }
-
-    const isMoving = move.current.lengthSq() > 0;
+    const isMoving = dx !== 0 || dz !== 0;
     movingRef.current = isMoving;
 
-    if (isMoving) {
-      camera.position.add(move.current);
-      controls.target.add(move.current);
+    // --- Gravity: constant press when grounded, accumulate when airborne ---
+    if (wasGroundedRef.current) {
+      if (yVelRef.current < 0) {
+        yVelRef.current = -2.0;
+      }
+    } else {
+      yVelRef.current -= GRAVITY * delta;
+      yVelRef.current = Math.max(yVelRef.current, -20);
     }
 
-    // Jump — only trigger once per Space press, only when grounded
-    const grounded = jumpY.current === 0 && jumpVel.current === 0;
-    if (k["Space"] && !spaceConsumed.current && grounded) {
-      jumpVel.current = JUMP_SPEED;
+    // --- Jump ---
+    if (k["Space"] && !spaceConsumed.current && wasGroundedRef.current) {
+      yVelRef.current = JUMP_SPEED;
       spaceConsumed.current = true;
     }
 
-    if (jumpVel.current !== 0 || jumpY.current > 0) {
-      jumpVel.current -= GRAVITY * delta;
-      jumpY.current = Math.max(0, jumpY.current + jumpVel.current * delta);
-      if (jumpY.current === 0 && jumpVel.current < 0) {
-        jumpVel.current = 0;
-      }
-    }
-
-    jumpingRef.current = jumpY.current > 0;
-
-    const gizmo = gizmoRef.current;
-    if (!gizmo) {
+    // --- Physics character controller step ---
+    if (body.numColliders() === 0) {
       return;
     }
+    const collider = body.collider(0);
+    controller.computeColliderMovement(collider, {
+      x: dx,
+      y: yVelRef.current * delta,
+      z: dz,
+    });
+    const movement = controller.computedMovement();
 
-    const tx = controls.target.x;
-    const tz = controls.target.z;
-    const ty = sampleGroundHeight(tx, tz);
-    gizmo.position.set(tx, ty + jumpY.current, tz);
-    gizmo.rotation.y = Math.atan2(fwd.current.x, fwd.current.z);
+    wasGroundedRef.current = controller.computedGrounded();
+    jumpingRef.current = !wasGroundedRef.current && yVelRef.current > 0;
 
-    // Keep orbit offset constant as terrain height changes under the character.
-    // By applying the same Y delta to both target and camera, the spherical
-    // orbit shape is preserved — the view angle stays locked to the horizon.
-    const newTargetY = ty + jumpY.current + CAMERA_TARGET_HEIGHT;
-    const targetYDelta = newTargetY - controls.target.y;
-    controls.target.y = newTargetY;
-    camera.position.y += targetYDelta;
+    const pos = body.translation();
+    const nextX = pos.x + movement.x;
+    const nextY = pos.y + movement.y;
+    const nextZ = pos.z + movement.z;
+    body.setNextKinematicTranslation({ x: nextX, y: nextY, z: nextZ });
+
+    // --- Visual rotation ---
+    if (gizmoRef.current && isMoving) {
+      gizmoRef.current.rotation.y = Math.atan2(fwd.current.x, fwd.current.z);
+    }
+
+    // --- Camera follow ---
+    const targetY = nextY + CAMERA_TARGET_HEIGHT;
+    const ddx = nextX - controls.target.x;
+    const ddy = targetY - controls.target.y;
+    const ddz = nextZ - controls.target.z;
+    controls.target.set(nextX, targetY, nextZ);
+    camera.position.x += ddx;
+    camera.position.y += ddy;
+    camera.position.z += ddz;
   });
 
   return null;

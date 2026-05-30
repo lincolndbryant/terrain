@@ -91,32 +91,32 @@ const populateTerrainBuffers = (
         colorTri1 = strategy.buildingPadColor;
         colorTri2 = strategy.buildingPadColor;
       } else {
-        // Darken steep faces to give a textured relief effect
+        // TL-BR diagonal: tri1=(TL,BR,TR), tri2=(TL,BL,BR)
         const slope1 = Math.min(
           1,
-          (Math.abs(h10 - h00) + Math.abs(h01 - h00)) * 0.1,
+          (Math.abs(h10 - h00) + Math.abs(h11 - h00)) * 0.1,
         );
         const slope2 = Math.min(
           1,
-          (Math.abs(h11 - h10) + Math.abs(h11 - h01)) * 0.1,
+          (Math.abs(h01 - h00) + Math.abs(h11 - h00)) * 0.1,
         );
         colorTri1 = dim(
-          strategy.colorForHeight((h00 + h10 + h01) / 3),
+          strategy.colorForHeight((h00 + h11 + h10) / 3),
           1 - slope1 * 0.3,
         );
         colorTri2 = dim(
-          strategy.colorForHeight((h10 + h11 + h01) / 3),
+          strategy.colorForHeight((h00 + h01 + h11) / 3),
           1 - slope2 * 0.3,
         );
       }
 
-      // Triangle 1: top-left, bottom-left, top-right
+      // Triangle 1: TL, BR, TR  (TL-BR diagonal, CCW from above → normal up)
       writeVertex(positions, colors, vertexIndex++, x0, h00, z0, colorTri1);
-      writeVertex(positions, colors, vertexIndex++, x0, h01, z1, colorTri1);
+      writeVertex(positions, colors, vertexIndex++, x1, h11, z1, colorTri1);
       writeVertex(positions, colors, vertexIndex++, x1, h10, z0, colorTri1);
 
-      // Triangle 2: top-right, bottom-left, bottom-right
-      writeVertex(positions, colors, vertexIndex++, x1, h10, z0, colorTri2);
+      // Triangle 2: TL, BL, BR
+      writeVertex(positions, colors, vertexIndex++, x0, h00, z0, colorTri2);
       writeVertex(positions, colors, vertexIndex++, x0, h01, z1, colorTri2);
       writeVertex(positions, colors, vertexIndex++, x1, h11, z1, colorTri2);
     }
@@ -194,6 +194,9 @@ const Terrain = ({ strategy }: TerrainProps) => {
         flatShading
         roughness={strategy.roughness}
         metalness={strategy.metalness}
+        polygonOffset
+        polygonOffsetFactor={2}
+        polygonOffsetUnits={2}
       />
     </mesh>
   );
