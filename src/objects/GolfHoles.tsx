@@ -1,16 +1,19 @@
-import { useState, useRef, MutableRefObject } from "react";
+import { useState, useRef, MutableRefObject, useCallback } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier, RigidBody } from "@react-three/rapier";
 import { useSetAtom } from "jotai";
 import * as THREE from "three";
 import { holeScoreAtom, lastCharPos } from "../store";
-import { sampleTerrainHeight } from "../terrain/terrainHeight";
-import {
-  TERRAIN_TILE_SIZE,
-  TERRAIN_REGEN_DISTANCE,
-  TERRAIN_SNAP_GRID,
-} from "../constants";
+import { TERRAIN_REGEN_DISTANCE, TERRAIN_SNAP_GRID } from "../constants";
 import type { RapierRigidBody } from "@react-three/rapier";
+import {
+  findHoles,
+  h2,
+  HoleData,
+  HOLE_RADIUS,
+  HOLE_COLLAR_RADIUS,
+  HOLE_DEPTH,
+} from "./holeLocations";
 
 let _v = 0;
 if (import.meta.hot) {
@@ -18,51 +21,6 @@ if (import.meta.hot) {
     _v++;
   });
 }
-
-const HALF = TERRAIN_TILE_SIZE / 2;
-const HOLE_STEP = 40;
-const HOLE_MAX_HEIGHT = 3;
-const HOLE_MIN_HEIGHT = -6;
-const HOLE_RADIUS = 4.0;
-// Character falls in if closer than this
-const CHAR_FALL_RADIUS = HOLE_RADIUS - 0.8;
-// Per-hole character cooldown (seconds) to avoid repeated trapping
-const CHAR_COOLDOWN = 4;
-
-const h2 = (x: number, z: number): number => {
-  let h = (Math.imul(x | 0, 127) ^ Math.imul(z | 0, 997) ^ 0x9e3779b9) >>> 0;
-  h ^= h >>> 16;
-  h = Math.imul(h, 0x45d9f3b) >>> 0;
-  h ^= h >>> 16;
-  return h;
-};
-
-type HoleData = { cx: number; cy: number; cz: number };
-
-const findHoles = (cx: number, cz: number): HoleData[] => {
-  const holes: HoleData[] = [];
-  for (let x = cx - HALF; x <= cx + HALF; x += HOLE_STEP) {
-    for (let z = cz - HALF; z <= cz + HALF; z += HOLE_STEP) {
-      const hy = sampleTerrainHeight(x, z);
-      if (hy > HOLE_MAX_HEIGHT || hy < HOLE_MIN_HEIGHT) {
-        continue;
-      }
-      if (
-        hy >= sampleTerrainHeight(x - HOLE_STEP, z) ||
-        hy >= sampleTerrainHeight(x + HOLE_STEP, z) ||
-        hy >= sampleTerrainHeight(x, z - HOLE_STEP) ||
-        hy >= sampleTerrainHeight(x, z + HOLE_STEP)
-      ) {
-        continue;
-      }
-      if ((h2(Math.round(x), Math.round(z)) & 0xff) > 155) {
-        continue;
-      }
-      holes.push({ cx: x, cy: hy, cz: z });
-    }
-  }
-  return holes;
-};
 
 // Deterministic ball spawn offset per hole
 const ballOffset = (h: HoleData): [number, number] => {
@@ -94,8 +52,6 @@ const GolfHoles = ({ bodyRef }: Props) => {
 
   const inProgress = useRef(new Map<number, number>());
   const holed = useRef(new Set<number>());
-  // Per-hole cooldowns for character: hole index → remaining seconds
-  const charCooldowns = useRef(new Map<number, number>());
 
   useFrame((_, delta) => {
     if (vRef.current !== _v) {
@@ -129,47 +85,7 @@ const GolfHoles = ({ bodyRef }: Props) => {
       return;
     }
 
-    // Tick down character hole cooldowns
-    charCooldowns.current.forEach((remaining, idx) => {
-      const next = remaining - delta;
-      if (next <= 0) {
-        charCooldowns.current.delete(idx);
-      } else {
-        charCooldowns.current.set(idx, next);
-      }
-    });
-
-    // Character fall-in detection
-    const charBody = bodyRef.current;
-    if (charBody) {
-      const cp = charBody.translation();
-      for (let i = 0; i < holes.length; i++) {
-        if (charCooldowns.current.has(i)) {
-          continue;
-        }
-        const h = holes[i];
-        const cdx = cp.x - h.cx;
-        const cdz = cp.z - h.cz;
-        if (cdx * cdx + cdz * cdz < CHAR_FALL_RADIUS * CHAR_FALL_RADIUS) {
-          // Eject to a safe spot just outside the hole
-          const ejectX = h.cx + HOLE_RADIUS * 2.2;
-          const ejectY = h.cy + 2.5;
-          const ejectZ = h.cz;
-          charBody.setNextKinematicTranslation({
-            x: ejectX,
-            y: ejectY,
-            z: ejectZ,
-          });
-          lastCharPos.x = ejectX;
-          lastCharPos.y = ejectY;
-          lastCharPos.z = ejectZ;
-          charCooldowns.current.set(i, CHAR_COOLDOWN);
-          break;
-        }
-      }
-    }
-
-    // Ball detection
+    // Ball detection — ball is holed when it reaches the pit floor
     world.forEachRigidBody((rb) => {
       if (!rb.isDynamic()) {
         return;
@@ -199,7 +115,7 @@ const GolfHoles = ({ bodyRef }: Props) => {
           true,
         );
         rb.setAngvel({ x: 0, y: 0, z: 0 }, true);
-        if (pos.y < hole.cy - 1.2 || elapsed > 1.2) {
+        if (pos.y < hole.cy - HOLE_DEPTH + 4 || elapsed > 1.2) {
           holed.current.add(handle);
           inProgress.current.delete(handle);
           rb.setTranslation({ x: 9999, y: 80, z: 9999 }, true);
@@ -217,48 +133,12 @@ const GolfHoles = ({ bodyRef }: Props) => {
         const [bx, bz] = ballOffset(h);
         return (
           <group key={`${tile.key}-${i}`}>
-            {/* Hole visuals — flat discs on terrain surface, normal depth test */}
-            <group position={[h.cx, h.cy, h.cz]}>
-              {/* Dirt collar */}
-              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
-                <ringGeometry
-                  args={[HOLE_RADIUS * 0.88, HOLE_RADIUS * 1.28, 48]}
-                />
-                <meshLambertMaterial
-                  color="#5c4020"
-                  polygonOffset
-                  polygonOffsetFactor={-2}
-                  polygonOffsetUnits={-2}
-                />
-              </mesh>
-              {/* Dark inner surround */}
-              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
-                <ringGeometry
-                  args={[HOLE_RADIUS * 0.45, HOLE_RADIUS * 0.88, 48]}
-                />
-                <meshBasicMaterial
-                  color="#1a1008"
-                  polygonOffset
-                  polygonOffsetFactor={-2}
-                  polygonOffsetUnits={-2}
-                />
-              </mesh>
-              {/* Black centre cap */}
-              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
-                <circleGeometry args={[HOLE_RADIUS * 0.45, 48]} />
-                <meshBasicMaterial
-                  color="#000000"
-                  polygonOffset
-                  polygonOffsetFactor={-2}
-                  polygonOffsetUnits={-2}
-                />
-              </mesh>
-              {/* Flag pole */}
+            {/* Flag at the hole rim */}
+            <group position={[h.cx + HOLE_COLLAR_RADIUS, h.cy, h.cz]}>
               <mesh position={[0, 1.0, 0]}>
                 <cylinderGeometry args={[0.03, 0.03, 2.0, 6]} />
                 <meshLambertMaterial color="#b8b8b8" />
               </mesh>
-              {/* Flag pennant */}
               <mesh position={[0.3, 1.8, 0]}>
                 <planeGeometry args={[0.6, 0.36]} />
                 <meshBasicMaterial color="#ff2222" side={THREE.DoubleSide} />

@@ -8,6 +8,12 @@ import {
   TERRAIN_REGEN_DISTANCE,
   TERRAIN_SNAP_GRID,
 } from "../constants";
+import {
+  findHoles,
+  getHoleAtPoint,
+  HoleData,
+  HOLE_DEPTH,
+} from "../objects/holeLocations";
 
 // Uses a TrimeshCollider built from the EXACT same vertex grid and TL-BR diagonal
 // split as the visual terrain, eliminating any physics/visual surface mismatch.
@@ -19,15 +25,24 @@ const INDEX_COUNT = TERRAIN_SEGMENTS * TERRAIN_SEGMENTS * 6;
 
 type TrimeshData = { vertices: Float32Array; indices: Uint32Array };
 
-const buildTrimesh = (cx: number, cz: number): TrimeshData => {
+const buildTrimesh = (
+  cx: number,
+  cz: number,
+  holes: HoleData[],
+): TrimeshData => {
   const vertices = new Float32Array(N * N * 3);
   for (let zi = 0; zi < N; zi++) {
     for (let xi = 0; xi < N; xi++) {
       const worldX = cx - HALF + xi * STEP;
       const worldZ = cz - HALF + zi * STEP;
       const base = (xi + zi * N) * 3;
+      let y = sampleGroundHeight(worldX, worldZ);
+      const hole = getHoleAtPoint(worldX, worldZ, holes);
+      if (hole) {
+        y = hole.cy - HOLE_DEPTH;
+      }
       vertices[base] = worldX - cx;
-      vertices[base + 1] = sampleGroundHeight(worldX, worldZ);
+      vertices[base + 1] = y;
       vertices[base + 2] = worldZ - cz;
     }
   }
@@ -57,12 +72,10 @@ type TileState = { cx: number; cz: number; mesh: TrimeshData; key: number };
 
 const TerrainCollider = () => {
   const { camera } = useThree();
-  const [tile, setTile] = useState<TileState>(() => ({
-    cx: 0,
-    cz: 0,
-    mesh: buildTrimesh(0, 0),
-    key: 0,
-  }));
+  const [tile, setTile] = useState<TileState>(() => {
+    const holes = findHoles(0, 0);
+    return { cx: 0, cz: 0, mesh: buildTrimesh(0, 0, holes), key: 0 };
+  });
   const tileRef = useRef(tile);
 
   useFrame(() => {
@@ -76,10 +89,11 @@ const TerrainCollider = () => {
       Math.round(camera.position.x / TERRAIN_SNAP_GRID) * TERRAIN_SNAP_GRID;
     const cz =
       Math.round(camera.position.z / TERRAIN_SNAP_GRID) * TERRAIN_SNAP_GRID;
+    const holes = findHoles(cx, cz);
     const next: TileState = {
       cx,
       cz,
-      mesh: buildTrimesh(cx, cz),
+      mesh: buildTrimesh(cx, cz, holes),
       key: t.key + 1,
     };
     tileRef.current = next;
