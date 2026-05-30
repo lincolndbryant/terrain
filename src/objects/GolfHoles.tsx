@@ -3,7 +3,6 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier, RigidBody } from "@react-three/rapier";
 import { useSetAtom } from "jotai";
 import * as THREE from "three";
-import { Mask } from "@react-three/drei";
 import { holeScoreAtom, lastCharPos } from "../store";
 import { sampleTerrainHeight } from "../terrain/terrainHeight";
 import {
@@ -24,10 +23,7 @@ const HALF = TERRAIN_TILE_SIZE / 2;
 const HOLE_STEP = 40;
 const HOLE_MAX_HEIGHT = 3;
 const HOLE_MIN_HEIGHT = -6;
-// Radius used for ball suction, character detection, and terrain stencil cut
 const HOLE_RADIUS = 4.0;
-// How far the stencil mask extends (cuts terrain in a clean circle)
-const HOLE_CUT_RADIUS = HOLE_RADIUS + 0.5;
 // Character falls in if closer than this
 const CHAR_FALL_RADIUS = HOLE_RADIUS - 0.8;
 // Per-hole character cooldown (seconds) to avoid repeated trapping
@@ -221,47 +217,41 @@ const GolfHoles = ({ bodyRef }: Props) => {
         const [bx, bz] = ballOffset(h);
         return (
           <group key={`${tile.key}-${i}`}>
-            {/* Hole visuals */}
+            {/* Hole visuals — flat discs on terrain surface, normal depth test */}
             <group position={[h.cx, h.cy, h.cz]}>
-              {/* Terrain stencil mask — drei Mask cuts a circle in the terrain */}
-              <Mask
-                id={1}
-                renderOrder={-1}
-                rotation={[-Math.PI / 2, 0, 0]}
-                position={[0, 0.1, 0]}
-              >
-                <circleGeometry args={[HOLE_CUT_RADIUS, 48]} />
-              </Mask>
-              {/* Dirt collar — sits over the cut edge */}
-              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
+              {/* Dirt collar */}
+              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
                 <ringGeometry
                   args={[HOLE_RADIUS * 0.88, HOLE_RADIUS * 1.28, 48]}
                 />
-                <meshLambertMaterial color="#5c4020" />
+                <meshLambertMaterial
+                  color="#5c4020"
+                  polygonOffset
+                  polygonOffsetFactor={-2}
+                  polygonOffsetUnits={-2}
+                />
               </mesh>
               {/* Dark inner surround */}
-              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.06, 0]}>
+              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
                 <ringGeometry
                   args={[HOLE_RADIUS * 0.45, HOLE_RADIUS * 0.88, 48]}
                 />
-                <meshBasicMaterial color="#1a1008" />
+                <meshBasicMaterial
+                  color="#1a1008"
+                  polygonOffset
+                  polygonOffsetFactor={-2}
+                  polygonOffsetUnits={-2}
+                />
               </mesh>
               {/* Black centre cap */}
-              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.07, 0]}>
+              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
                 <circleGeometry args={[HOLE_RADIUS * 0.45, 48]} />
-                <meshBasicMaterial color="#000000" />
-              </mesh>
-              {/* Shaft — tapered tube, BackSide so walls visible from above */}
-              <mesh position={[0, -6, 0]}>
-                <cylinderGeometry
-                  args={[HOLE_CUT_RADIUS, HOLE_RADIUS * 0.4, 12, 40, 1, true]}
+                <meshBasicMaterial
+                  color="#000000"
+                  polygonOffset
+                  polygonOffsetFactor={-2}
+                  polygonOffsetUnits={-2}
                 />
-                <meshBasicMaterial color="#080604" side={THREE.BackSide} />
-              </mesh>
-              {/* Shaft bottom cap */}
-              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -12, 0]}>
-                <circleGeometry args={[HOLE_RADIUS * 0.4, 32]} />
-                <meshBasicMaterial color="#030201" />
               </mesh>
               {/* Flag pole */}
               <mesh position={[0, 1.0, 0]}>
