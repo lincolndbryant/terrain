@@ -1,4 +1,4 @@
-import { useRef, useEffect, RefObject } from "react";
+import { useRef, useEffect, RefObject, MutableRefObject } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { OrbitControls as OrbitControlsBase } from "three-stdlib";
@@ -9,16 +9,20 @@ import {
   KEYBOARD_MOVE_SPEED,
   KEYBOARD_TURN_SPEED,
 } from "../constants";
+import { lastCharPos } from "../store";
 
 const JUMP_SPEED = 10;
 const GRAVITY = 30;
+const KICK_RADIUS = 2.5;
+const KICK_COOLDOWN = 0.4;
 
 type Props = {
   controlsRef: RefObject<OrbitControlsBase | null>;
   gizmoRef: RefObject<THREE.Group | null>;
   bodyRef: RefObject<RapierRigidBody | null>;
-  movingRef: RefObject<boolean>;
-  jumpingRef: RefObject<boolean>;
+  movingRef: MutableRefObject<boolean>;
+  jumpingRef: MutableRefObject<boolean>;
+  kickingRef: MutableRefObject<number>;
 };
 
 const GizmoMovement = ({
@@ -27,6 +31,7 @@ const GizmoMovement = ({
   bodyRef,
   movingRef,
   jumpingRef,
+  kickingRef,
 }: Props): null => {
   const { camera } = useThree();
   const { world } = useRapier();
@@ -37,6 +42,8 @@ const GizmoMovement = ({
   const yVelRef = useRef(0);
   const wasGroundedRef = useRef(false);
   const spaceConsumed = useRef(false);
+  const kickConsumed = useRef(false);
+  const kickCooldown = useRef(0);
   const controllerRef = useRef<ReturnType<
     typeof world.createCharacterController
   > | null>(null);
@@ -63,6 +70,9 @@ const GizmoMovement = ({
       keys.current[e.code] = false;
       if (e.code === "Space") {
         spaceConsumed.current = false;
+      }
+      if (e.code === "KeyK") {
+        kickConsumed.current = false;
       }
     };
     window.addEventListener("keydown", dn);
@@ -128,6 +138,35 @@ const GizmoMovement = ({
       spaceConsumed.current = true;
     }
 
+    // --- Kick ---
+    kickCooldown.current = Math.max(0, kickCooldown.current - delta);
+    if (k["KeyK"] && !kickConsumed.current && kickCooldown.current === 0) {
+      kickConsumed.current = true;
+      kickCooldown.current = KICK_COOLDOWN;
+      kickingRef.current += 1;
+      const charPos = body.translation();
+      world.forEachRigidBody((rb) => {
+        if (!rb.isDynamic()) {
+          return;
+        }
+        const rp = rb.translation();
+        const ddx = rp.x - charPos.x;
+        const ddy = rp.y - charPos.y;
+        const ddz = rp.z - charPos.z;
+        if (ddx * ddx + ddy * ddy + ddz * ddz > KICK_RADIUS * KICK_RADIUS) {
+          return;
+        }
+        rb.applyImpulse(
+          {
+            x: fwd.current.x * 22 + ddx * 4,
+            y: 18,
+            z: fwd.current.z * 22 + ddz * 4,
+          },
+          true,
+        );
+      });
+    }
+
     // --- Physics character controller step ---
     if (body.numColliders() === 0) {
       return;
@@ -148,6 +187,9 @@ const GizmoMovement = ({
     const nextY = pos.y + movement.y;
     const nextZ = pos.z + movement.z;
     body.setNextKinematicTranslation({ x: nextX, y: nextY, z: nextZ });
+    lastCharPos.x = nextX;
+    lastCharPos.y = nextY;
+    lastCharPos.z = nextZ;
 
     // --- Visual rotation ---
     if (gizmoRef.current && isMoving) {

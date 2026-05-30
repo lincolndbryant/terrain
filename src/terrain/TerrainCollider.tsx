@@ -1,13 +1,13 @@
 import { useState, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { RigidBody, TrimeshCollider } from "@react-three/rapier";
-import { sampleGroundHeight } from "./buildingPads";
+import { sampleGroundHeight } from "../buildings/buildingPads";
 import {
   TERRAIN_TILE_SIZE,
   TERRAIN_SEGMENTS,
   TERRAIN_REGEN_DISTANCE,
   TERRAIN_SNAP_GRID,
-} from "./constants";
+} from "../constants";
 
 // Uses a TrimeshCollider built from the EXACT same vertex grid and TL-BR diagonal
 // split as the visual terrain, eliminating any physics/visual surface mismatch.

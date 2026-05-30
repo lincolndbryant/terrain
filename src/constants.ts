@@ -1,13 +1,13 @@
 import { Vec3 } from "./types";
 
-export const KEYBOARD_MOVE_SPEED = 0.12;
+export const KEYBOARD_MOVE_SPEED = 0.2;
 export const KEYBOARD_TURN_SPEED = 0.01;
 
 // Camera setup — initial position gives ~10° downward pitch → ~1/3 sky at FOV 60
 export const CAMERA_FOV = 60;
 export const CAMERA_NEAR = 0.1;
 export const CAMERA_FAR = 700;
-export const CAMERA_INITIAL_POSITION: Vec3 = [0, 1.7, 14];
+export const CAMERA_INITIAL_POSITION: Vec3 = [0, 2, 24];
 
 // Orbit constraints
 export const ORBIT_MIN_DISTANCE = 2;
@@ -34,3 +34,10 @@ export const TERRAIN_MOUNTAIN_SCALE = 250;
 
 export const BUILDING_PAD_CELL_SIZE = 180;
 export const BUILDING_PAD_PROBABILITY = 0.5;
+
+// Self-accept so changes don't trigger a full page reload.
+// Live-bound imports (movement speed, camera settings, etc.) update immediately.
+// Geometry-derived module-level constants take effect on the next tile regen.
+if (import.meta.hot) {
+  import.meta.hot.accept();
+}

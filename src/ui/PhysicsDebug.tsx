@@ -1,13 +1,13 @@
 import { useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { sampleGroundHeight } from "./buildingPads";
+import { sampleGroundHeight } from "../buildings/buildingPads";
 import {
   TERRAIN_TILE_SIZE,
   TERRAIN_SEGMENTS,
   TERRAIN_REGEN_DISTANCE,
   TERRAIN_SNAP_GRID,
-} from "./constants";
+} from "../constants";
 
 // Mirrors the exact grid layout of TerrainCollider's HeightfieldCollider.
 // Renders as a wireframe so physics collision geometry is visible over the

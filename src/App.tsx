@@ -1,9 +1,15 @@
 import { useRef, useState, useEffect, Suspense } from "react";
+import { useAtom } from "jotai";
 import { useThree } from "@react-three/fiber";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
-import { Physics, RigidBody, CapsuleCollider } from "@react-three/rapier";
+import { OrbitControls, Environment } from "@react-three/drei";
+import {
+  Physics,
+  RigidBody,
+  CapsuleCollider,
+  CuboidCollider,
+} from "@react-three/rapier";
 import type { RapierRigidBody } from "@react-three/rapier";
 import { Color, Fog, Group, Scene } from "three";
 import { OrbitControls as OrbitControlsBase } from "three-stdlib";
@@ -11,7 +17,7 @@ import {
   earthStrategy,
   ALL_STRATEGIES,
   TerrainStrategy,
-} from "./TerrainStrategy";
+} from "./terrain/TerrainStrategy";
 import {
   CAMERA_FAR,
   CAMERA_FOV,
@@ -23,18 +29,20 @@ import {
   ORBIT_MIN_DISTANCE,
   ORBIT_MIN_POLAR_ANGLE,
 } from "./constants";
-import { sampleGroundHeight } from "./buildingPads";
+import { coinScoreAtom, holeScoreAtom, lastCharPos } from "./store";
 
 type OrbitControlsImpl = OrbitControlsBase;
-import Terrain from "./Terrain";
-import PhysicsDebug from "./PhysicsDebug";
-import TerrainCollider from "./TerrainCollider";
-import StepCubes from "./StepCubes";
-import SettingsPanel from "./SettingsPanel";
+import Terrain from "./terrain/Terrain";
+import PhysicsDebug from "./ui/PhysicsDebug";
+import TerrainCollider from "./terrain/TerrainCollider";
+import StepCubes from "./buildings/StepCubes";
+import Coins from "./objects/Coins";
+import GolfHoles from "./objects/GolfHoles";
+import SettingsPanel from "./ui/SettingsPanel";
 import Gizmo from "./characters/Gizmo";
 import GizmoModel from "./characters/GizmoModel";
 import GizmoMovement from "./characters/GizmoMovement";
-import CharacterViewer from "./CharacterViewer";
+import CharacterViewer from "./ui/CharacterViewer";
 
 export type CharacterId = "model" | "builtin";
 
@@ -150,10 +158,11 @@ const App = () => {
 };
 
 type ActiveCharacterProps = {
-  gizmoRef: React.RefObject<Group | null>;
-  bodyRef: React.RefObject<RapierRigidBody | null>;
-  movingRef: React.RefObject<boolean>;
-  jumpingRef: React.RefObject<boolean>;
+  gizmoRef: React.MutableRefObject<Group | null>;
+  bodyRef: React.MutableRefObject<RapierRigidBody | null>;
+  movingRef: React.MutableRefObject<boolean>;
+  jumpingRef: React.MutableRefObject<boolean>;
+  kickingRef: React.MutableRefObject<number>;
   characterId: CharacterId;
 };
 
@@ -162,9 +171,10 @@ const ActiveCharacter = ({
   bodyRef,
   movingRef,
   jumpingRef,
+  kickingRef,
   characterId,
 }: ActiveCharacterProps) => {
-  const initialY = sampleGroundHeight(0, 0) + 4;
+  const initPos = lastCharPos;
   const mesh =
     characterId === "model" ? (
       <Suspense fallback={null}>
@@ -175,14 +185,19 @@ const ActiveCharacter = ({
         />
       </Suspense>
     ) : (
-      <Gizmo ref={gizmoRef} movingRef={movingRef} jumpingRef={jumpingRef} />
+      <Gizmo
+        ref={gizmoRef}
+        movingRef={movingRef}
+        jumpingRef={jumpingRef}
+        kickingRef={kickingRef}
+      />
     );
   return (
     <RigidBody
       ref={bodyRef}
       type="kinematicPosition"
       colliders={false}
-      position={[0, initialY, 0]}
+      position={[initPos.x, initPos.y, initPos.z]}
     >
       <CapsuleCollider args={[0.4, 0.25]} position={[0, 0.65, 0]} />
       {mesh}
@@ -204,12 +219,15 @@ const TerrainView = ({ characterId, onCharacterChange }: TerrainViewProps) => {
   const bodyRef = useRef<RapierRigidBody | null>(null);
   const movingRef = useRef(false);
   const jumpingRef = useRef(false);
+  const kickingRef = useRef(0);
   const [fogDensity, setFogDensity] = useState(earthStrategy.defaultFogDensity);
   const [viewDistance, setViewDistance] = useState(
     earthStrategy.defaultViewDistance,
   );
   const [strategy, setStrategy] = useState<TerrainStrategy>(earthStrategy);
   const [debugPhysics, setDebugPhysics] = useState(false);
+  const [coinScore] = useAtom(coinScoreAtom);
+  const [holeScore] = useAtom(holeScoreAtom);
 
   useEffect(() => {
     if (!fogRef.current) {
@@ -254,6 +272,11 @@ const TerrainView = ({ characterId, onCharacterChange }: TerrainViewProps) => {
         <ambientLight intensity={0.45} />
         <directionalLight position={[60, 80, 40]} intensity={1.6} />
         <hemisphereLight args={["#a8d0e6", "#6b8e4e", 0.5]} />
+        <Environment
+          preset="park"
+          background={false}
+          environmentIntensity={0.4}
+        />
 
         <OrbitControls
           ref={controlsRef}
@@ -263,7 +286,6 @@ const TerrainView = ({ characterId, onCharacterChange }: TerrainViewProps) => {
           maxDistance={ORBIT_MAX_DISTANCE}
           minPolarAngle={ORBIT_MIN_POLAR_ANGLE}
           maxPolarAngle={ORBIT_MAX_POLAR_ANGLE}
-          enableKeys={false}
           enablePan={false}
         />
         <Suspense fallback={null}>
@@ -274,37 +296,48 @@ const TerrainView = ({ characterId, onCharacterChange }: TerrainViewProps) => {
               bodyRef={bodyRef}
               movingRef={movingRef}
               jumpingRef={jumpingRef}
+              kickingRef={kickingRef}
             />
             <ActiveCharacter
               gizmoRef={gizmoRef}
               bodyRef={bodyRef}
               movingRef={movingRef}
               jumpingRef={jumpingRef}
+              kickingRef={kickingRef}
               characterId={characterId}
             />
             <TerrainCollider />
+            <RigidBody type="fixed" position={[0, -200, 0]} colliders={false}>
+              <CuboidCollider args={[1000, 1, 1000]} />
+            </RigidBody>
             <StepCubes />
-            {[-20, 0, 20].flatMap((x) =>
-              [-20, 0, 20].map((z) => (
-                <RigidBody
-                  key={`sphere-${x}-${z}`}
-                  type="dynamic"
-                  position={[x, 30, z]}
-                  restitution={0.3}
-                  friction={0.8}
-                >
-                  <mesh>
-                    <sphereGeometry args={[0.5, 10, 8]} />
-                    <meshStandardMaterial color="#e05050" />
-                  </mesh>
-                </RigidBody>
-              )),
-            )}
+            <GolfHoles bodyRef={bodyRef} />
           </Physics>
         </Suspense>
         <Terrain strategy={strategy} />
         {debugPhysics && <PhysicsDebug />}
+        <Coins bodyRef={bodyRef} />
       </Canvas>
+
+      <div
+        style={{
+          position: "fixed",
+          top: 16,
+          left: 16,
+          background: "rgba(0,0,0,0.45)",
+          border: "1px solid rgba(255,255,255,0.18)",
+          color: "rgba(255,255,255,0.9)",
+          fontSize: 15,
+          fontFamily: "monospace",
+          padding: "6px 16px",
+          borderRadius: 8,
+          pointerEvents: "none",
+          userSelect: "none",
+          letterSpacing: "0.06em",
+        }}
+      >
+        ◎ {coinScore} &nbsp;⛳ {holeScore}
+      </div>
 
       <div
         style={{

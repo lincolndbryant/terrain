@@ -1,12 +1,52 @@
 import { useState, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { RigidBody } from "@react-three/rapier";
+import * as THREE from "three";
 import { getPadsInRegion, type PadStep } from "./buildingPads";
 import {
   TERRAIN_TILE_SIZE,
   TERRAIN_REGEN_DISTANCE,
   TERRAIN_SNAP_GRID,
-} from "./constants";
+} from "../constants";
+
+let _v = 0;
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    _v++;
+  });
+}
+
+const makeStoneTexture = (): THREE.CanvasTexture => {
+  const S = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = S;
+  canvas.height = S;
+  const ctx = canvas.getContext("2d")!;
+  const BW = 96;
+  const BH = 48;
+  ctx.fillStyle = "#585858";
+  ctx.fillRect(0, 0, S, S);
+  for (let row = 0; row * BH <= S; row++) {
+    const shift = row & 1 ? BW / 2 : 0;
+    for (let col = -1; (col - 1) * BW < S; col++) {
+      const bx = col * BW + shift;
+      const by = row * BH;
+      const tone = 94 + (((col * 13) ^ (row * 7)) & 31);
+      ctx.fillStyle = `rgb(${tone + 3},${tone},${tone - 2})`;
+      ctx.fillRect(bx + 3, by + 3, BW - 5, BH - 5);
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(bx + 3, by + 3, BW - 5, 5);
+      ctx.globalAlpha = 1;
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+};
+
+const STONE_TEX = makeStoneTexture();
 
 const HALF = TERRAIN_TILE_SIZE / 2;
 
@@ -26,11 +66,19 @@ const StepCubes = () => {
     key: 0,
   }));
   const tileRef = useRef(tile);
+  const vRef = useRef(_v);
 
   useFrame(() => {
     const t = tileRef.current;
-    const dx = camera.position.x - t.cx;
-    const dz = camera.position.z - t.cz;
+
+    // HMR: force regen when module updates
+    if (vRef.current !== _v) {
+      vRef.current = _v;
+      tileRef.current = { ...t, cx: Infinity };
+    }
+
+    const dx = camera.position.x - tileRef.current.cx;
+    const dz = camera.position.z - tileRef.current.cz;
     if (dx * dx + dz * dz < TERRAIN_REGEN_DISTANCE * TERRAIN_REGEN_DISTANCE) {
       return;
     }
@@ -61,7 +109,11 @@ const StepCubes = () => {
         >
           <mesh>
             <boxGeometry args={[s.hw * 2, s.hh * 2, s.hd * 2]} />
-            <meshStandardMaterial color="#6b5045" roughness={0.9} />
+            <meshStandardMaterial
+              map={STONE_TEX}
+              roughness={0.88}
+              metalness={0.05}
+            />
           </mesh>
         </RigidBody>
       ))}

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useEffect } from "react";
-import { RGB } from "./types";
+import { RGB } from "../types";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import {
@@ -7,10 +7,17 @@ import {
   TERRAIN_SEGMENTS,
   TERRAIN_REGEN_DISTANCE,
   TERRAIN_SNAP_GRID,
-} from "./constants";
+} from "../constants";
 import { sampleTerrainHeight } from "./terrainHeight";
-import { getPadAtPoint } from "./buildingPads";
+import { getPadAtPoint } from "../buildings/buildingPads";
 import { TerrainStrategy } from "./TerrainStrategy";
+
+let _v = 0;
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    _v++;
+  });
+}
 
 // Tile large enough that fog always hides the edge:
 // TERRAIN_TILE_SIZE/2 - TERRAIN_REGEN_DISTANCE > fog far  →  360 - 120 = 240 < 650 max
@@ -131,6 +138,7 @@ const Terrain = ({ strategy }: TerrainProps) => {
   const { camera } = useThree();
   const center = useRef(new THREE.Vector2(0, 0));
   const strategyRef = useRef(strategy);
+  const vRef = useRef(_v);
 
   const geo = useMemo(() => {
     const g = new THREE.BufferGeometry();
@@ -159,6 +167,12 @@ const Terrain = ({ strategy }: TerrainProps) => {
   }, [strategy, geo]);
 
   useFrame(() => {
+    // HMR: force repopulate when module updates
+    if (vRef.current !== _v) {
+      vRef.current = _v;
+      center.current.set(Infinity, Infinity);
+    }
+
     const cx = camera.position.x;
     const cz = camera.position.z;
     const dx = cx - center.current.x;

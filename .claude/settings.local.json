@@ -33,7 +33,9 @@
       "Bash(xargs cat *)",
       "Bash(git *)",
       "WebFetch(domain:medium.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(npx prettier *)",
+      "Bash(npx tsc *)"
     ]
   }
 }
