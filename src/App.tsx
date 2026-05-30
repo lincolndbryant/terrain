@@ -258,7 +258,7 @@ const TerrainView = ({ characterId, onCharacterChange }: TerrainViewProps) => {
           far: CAMERA_FAR,
           position: CAMERA_INITIAL_POSITION,
         }}
-        gl={{ antialias: true }}
+        gl={{ antialias: true, stencil: true }}
         onCreated={({ scene }) => {
           sceneRef.current = scene;
           scene.background = new Color(strategy.skyColor);

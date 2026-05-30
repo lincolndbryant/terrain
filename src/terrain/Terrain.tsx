@@ -2,6 +2,7 @@ import { useMemo, useRef, useEffect } from "react";
 import { RGB } from "../types";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
+import { useMask } from "@react-three/drei";
 import {
   TERRAIN_TILE_SIZE,
   TERRAIN_SEGMENTS,
@@ -151,9 +152,29 @@ const Terrain = ({ strategy }: TerrainProps) => {
     return g;
   }, []);
 
+  // useMask(1, true) = render everywhere EXCEPT inside Mask id=1 shapes.
+  // Values are stable constants; capturing in useMemo via eslint-disable is safe.
+  const maskProps = useMask(1, true);
+  const mat = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      flatShading: true,
+      roughness: strategy.roughness,
+      metalness: strategy.metalness,
+      polygonOffset: true,
+      polygonOffsetFactor: 2,
+      polygonOffsetUnits: 2,
+    });
+    Object.assign(m, maskProps);
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // When strategy changes, repopulate only colors — positions are unchanged.
   useEffect(() => {
     strategyRef.current = strategy;
+    mat.roughness = strategy.roughness;
+    mat.metalness = strategy.metalness;
     const positions = geo.attributes.position.array as Float32Array;
     const colors = geo.attributes.color.array as Float32Array;
     populateTerrainBuffers(
@@ -164,7 +185,7 @@ const Terrain = ({ strategy }: TerrainProps) => {
       strategy,
     );
     geo.attributes.color.needsUpdate = true;
-  }, [strategy, geo]);
+  }, [strategy, geo, mat]);
 
   useFrame(() => {
     // HMR: force repopulate when module updates
@@ -201,19 +222,7 @@ const Terrain = ({ strategy }: TerrainProps) => {
     geo.computeBoundingSphere();
   });
 
-  return (
-    <mesh geometry={geo}>
-      <meshStandardMaterial
-        vertexColors
-        flatShading
-        roughness={strategy.roughness}
-        metalness={strategy.metalness}
-        polygonOffset
-        polygonOffsetFactor={2}
-        polygonOffsetUnits={2}
-      />
-    </mesh>
-  );
+  return <mesh geometry={geo} material={mat} />;
 };
 
 export default Terrain;

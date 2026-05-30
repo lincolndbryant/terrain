@@ -3,6 +3,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier, RigidBody } from "@react-three/rapier";
 import { useSetAtom } from "jotai";
 import * as THREE from "three";
+import { Mask } from "@react-three/drei";
 import { holeScoreAtom, lastCharPos } from "../store";
 import { sampleTerrainHeight } from "../terrain/terrainHeight";
 import {
@@ -23,10 +24,12 @@ const HALF = TERRAIN_TILE_SIZE / 2;
 const HOLE_STEP = 40;
 const HOLE_MAX_HEIGHT = 3;
 const HOLE_MIN_HEIGHT = -6;
-// Radius used for ball suction and character detection
-const HOLE_RADIUS = 2.8;
+// Radius used for ball suction, character detection, and terrain stencil cut
+const HOLE_RADIUS = 4.0;
+// How far the stencil mask extends (cuts terrain in a clean circle)
+const HOLE_CUT_RADIUS = HOLE_RADIUS + 0.5;
 // Character falls in if closer than this
-const CHAR_FALL_RADIUS = HOLE_RADIUS - 0.4;
+const CHAR_FALL_RADIUS = HOLE_RADIUS - 0.8;
 // Per-hole character cooldown (seconds) to avoid repeated trapping
 const CHAR_COOLDOWN = 4;
 
@@ -220,31 +223,45 @@ const GolfHoles = ({ bodyRef }: Props) => {
           <group key={`${tile.key}-${i}`}>
             {/* Hole visuals */}
             <group position={[h.cx, h.cy, h.cz]}>
-              {/* Dirt outer rim */}
-              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
+              {/* Terrain stencil mask — drei Mask cuts a circle in the terrain */}
+              <Mask
+                id={1}
+                renderOrder={-1}
+                rotation={[-Math.PI / 2, 0, 0]}
+                position={[0, 0.1, 0]}
+              >
+                <circleGeometry args={[HOLE_CUT_RADIUS, 48]} />
+              </Mask>
+              {/* Dirt collar — sits over the cut edge */}
+              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
                 <ringGeometry
-                  args={[HOLE_RADIUS * 0.95, HOLE_RADIUS * 1.3, 40]}
+                  args={[HOLE_RADIUS * 0.88, HOLE_RADIUS * 1.28, 48]}
                 />
                 <meshLambertMaterial color="#5c4020" />
               </mesh>
-              {/* Dark inner ring — grades to black */}
-              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
+              {/* Dark inner surround */}
+              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.06, 0]}>
                 <ringGeometry
-                  args={[HOLE_RADIUS * 0.5, HOLE_RADIUS * 0.95, 40]}
+                  args={[HOLE_RADIUS * 0.45, HOLE_RADIUS * 0.88, 48]}
                 />
                 <meshBasicMaterial color="#1a1008" />
               </mesh>
-              {/* Black centre */}
-              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.06, 0]}>
-                <circleGeometry args={[HOLE_RADIUS * 0.5, 40]} />
+              {/* Black centre cap */}
+              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.07, 0]}>
+                <circleGeometry args={[HOLE_RADIUS * 0.45, 48]} />
                 <meshBasicMaterial color="#000000" />
               </mesh>
-              {/* Shaft — inner walls visible from above */}
-              <mesh position={[0, -2.5, 0]}>
+              {/* Shaft — tapered tube, BackSide so walls visible from above */}
+              <mesh position={[0, -6, 0]}>
                 <cylinderGeometry
-                  args={[HOLE_RADIUS * 0.92, HOLE_RADIUS * 0.6, 5, 32, 1, true]}
+                  args={[HOLE_CUT_RADIUS, HOLE_RADIUS * 0.4, 12, 40, 1, true]}
                 />
-                <meshBasicMaterial color="#050403" side={THREE.BackSide} />
+                <meshBasicMaterial color="#080604" side={THREE.BackSide} />
+              </mesh>
+              {/* Shaft bottom cap */}
+              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -12, 0]}>
+                <circleGeometry args={[HOLE_RADIUS * 0.4, 32]} />
+                <meshBasicMaterial color="#030201" />
               </mesh>
               {/* Flag pole */}
               <mesh position={[0, 1.0, 0]}>
@@ -252,8 +269,8 @@ const GolfHoles = ({ bodyRef }: Props) => {
                 <meshLambertMaterial color="#b8b8b8" />
               </mesh>
               {/* Flag pennant */}
-              <mesh position={[0.26, 1.8, 0]}>
-                <planeGeometry args={[0.52, 0.32]} />
+              <mesh position={[0.3, 1.8, 0]}>
+                <planeGeometry args={[0.6, 0.36]} />
                 <meshBasicMaterial color="#ff2222" side={THREE.DoubleSide} />
               </mesh>
             </group>
