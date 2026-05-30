@@ -7,7 +7,7 @@ import {
   TERRAIN_NOISE_GAIN,
   TERRAIN_MOUNTAIN_FREQUENCY,
   TERRAIN_MOUNTAIN_SCALE,
-} from "./constants";
+} from "../constants";
 
 export const sampleBaseHeight = (worldX: number, worldZ: number): number =>
   fractalNoise(

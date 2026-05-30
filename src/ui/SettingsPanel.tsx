@@ -1,4 +1,4 @@
-import { TerrainStrategy } from "./TerrainStrategy";
+import { TerrainStrategy } from "../terrain/TerrainStrategy";
 
 type Props = {
   fogDensity: number;

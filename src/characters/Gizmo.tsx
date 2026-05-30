@@ -1,4 +1,4 @@
-import { forwardRef, useRef, RefObject } from "react";
+import { forwardRef, useRef, MutableRefObject } from "react";
 import { Vec3 } from "../types";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
@@ -10,6 +10,8 @@ const WALK_ROLL_AMOUNT = 0.12;
 const JUMP_LEG_TUCK = 0.9;
 const JUMP_LEG_TUCK_SPEED = 0.18;
 const LEG_RETURN_SPEED = 0.3;
+const KICK_EXTEND = 0.14; // seconds to swing leg forward
+const KICK_TOTAL = 0.42; // total kick animation duration
 
 const FUR_CREAM = "#e8dcc8";
 const FUR_LIGHT = "#f0e8d8";
@@ -23,8 +25,9 @@ const EYE_WHITE = "#f8f4ee";
 const EYE_SHINE = "#5bb8f5";
 
 type Props = {
-  movingRef: RefObject<boolean>;
-  jumpingRef?: RefObject<boolean>;
+  movingRef: MutableRefObject<boolean>;
+  jumpingRef?: MutableRefObject<boolean>;
+  kickingRef?: MutableRefObject<number>;
 };
 
 const LegGroup = ({
@@ -33,21 +36,59 @@ const LegGroup = ({
   walkPhaseRef,
   movingRef,
   jumpingRef,
+  kickingRef,
+  isKickLeg,
 }: {
   position: Vec3;
   phaseOffset: number;
-  walkPhaseRef: RefObject<number>;
-  movingRef: RefObject<boolean>;
-  jumpingRef?: RefObject<boolean>;
+  walkPhaseRef: MutableRefObject<number>;
+  movingRef: MutableRefObject<boolean>;
+  jumpingRef?: MutableRefObject<boolean>;
+  kickingRef?: MutableRefObject<number>;
+  isKickLeg?: boolean;
 }) => {
   const groupRef = useRef<THREE.Group>(null);
+  const lastKickSeenRef = useRef(-1);
+  const kickTRef = useRef(0);
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     if (!groupRef.current) {
       return;
     }
+
+    // Detect a new kick signal on this leg
+    if (
+      isKickLeg &&
+      kickingRef &&
+      kickingRef.current !== lastKickSeenRef.current
+    ) {
+      lastKickSeenRef.current = kickingRef.current;
+      kickTRef.current = 0.001;
+    }
+
+    // Kick animation overrides everything while active
+    if (isKickLeg && kickTRef.current > 0) {
+      kickTRef.current += delta;
+      let kickAngle: number;
+      if (kickTRef.current < KICK_EXTEND) {
+        // Snap forward fast
+        kickAngle = -1.7 * (kickTRef.current / KICK_EXTEND);
+      } else {
+        // Ease back
+        const t = (kickTRef.current - KICK_EXTEND) / (KICK_TOTAL - KICK_EXTEND);
+        kickAngle = -1.7 * (1 - t);
+      }
+      if (kickTRef.current >= KICK_TOTAL) {
+        kickTRef.current = 0;
+        // Fall through to normal animation this frame
+      } else {
+        groupRef.current.rotation.x +=
+          (kickAngle - groupRef.current.rotation.x) * 0.7;
+        return;
+      }
+    }
+
     const jumping = jumpingRef?.current ?? false;
-    // Legs tuck up during jump
     if (jumping) {
       groupRef.current.rotation.x +=
         (JUMP_LEG_TUCK - groupRef.current.rotation.x) * JUMP_LEG_TUCK_SPEED;
@@ -74,7 +115,7 @@ const LegGroup = ({
 };
 
 const Gizmo = forwardRef<THREE.Group, Props>(
-  ({ movingRef, jumpingRef }, ref) => {
+  ({ movingRef, jumpingRef, kickingRef }, ref) => {
     const walkPhaseRef = useRef(0);
     const bodyGroupRef = useRef<THREE.Group>(null);
 
@@ -282,6 +323,8 @@ const Gizmo = forwardRef<THREE.Group, Props>(
             walkPhaseRef={walkPhaseRef}
             movingRef={movingRef}
             jumpingRef={jumpingRef}
+            kickingRef={kickingRef}
+            isKickLeg
           />
           <LegGroup
             position={[-0.24, 0.38, -0.32]}

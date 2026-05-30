@@ -4,9 +4,9 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import { Color } from "three";
 import * as THREE from "three";
-import GizmoModel from "./characters/GizmoModel";
-import Gizmo from "./characters/Gizmo";
-import { CharacterId, CHARACTER_OPTIONS, SelectField } from "./App";
+import GizmoModel from "../characters/GizmoModel";
+import Gizmo from "../characters/Gizmo";
+import { CharacterId, CHARACTER_OPTIONS, SelectField } from "../App";
 
 const BUTTON_STYLE: React.CSSProperties = {
   background: "rgba(255,255,255,0.08)",

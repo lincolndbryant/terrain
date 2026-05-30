@@ -1,5 +1,5 @@
-import { sampleTerrainHeight } from "./terrainHeight";
-import { BUILDING_PAD_CELL_SIZE, BUILDING_PAD_PROBABILITY } from "./constants";
+import { sampleTerrainHeight } from "../terrain/terrainHeight";
+import { BUILDING_PAD_CELL_SIZE, BUILDING_PAD_PROBABILITY } from "../constants";
 
 export type PadFloor = {
   cx: number;
@@ -18,6 +18,12 @@ export type PadStep = {
   hd: number;
 };
 
+export type PadCoin = {
+  cx: number;
+  cy: number;
+  cz: number;
+};
+
 type Pad = {
   centerX: number;
   centerZ: number;
@@ -25,14 +31,18 @@ type Pad = {
   halfD: number;
   height: number;
   steps: PadStep[];
+  coins: PadCoin[];
 };
 
-const STEP_COUNT = 4;
-const STEP_BASE_H = 0.55;
-const STEP_RISE = 0.65;
-const STEP_HALF_DEPTH = 0.8;
-const STEP_HALF_WIDTH = 1.1;
-const STEP_SPACING = STEP_HALF_DEPTH * 2 + 0.45;
+// Direction unit vectors: 0=+X, 1=+Z, 2=-X, 3=-Z
+const STEP_DX = [1, 0, -1, 0] as const;
+const STEP_DZ = [0, 1, 0, -1] as const;
+const STEP_DEPTH = 1.6; // half = 0.8, size in travel direction
+const STEP_WIDTH = 2.4; // half = 1.2, size perpendicular to travel
+const STEP_FIRST_H = 0.5; // height of the first block above pad
+const STEP_RISE = 0.4; // height added per climbing step (≤ autostep limit)
+const STEP_MAX_H = 8.0; // max cumulative height above pad
+const STEP_MAX_N = 24; // max number of step blocks
 
 const computeSteps = (
   padCX: number,
@@ -42,31 +52,67 @@ const computeSteps = (
   padHalfD: number,
   seed: number,
 ): PadStep[] => {
-  const dirIdx = seed & 3;
-  const moveDX = dirIdx === 0 ? 1 : dirIdx === 1 ? -1 : 0;
-  const moveDZ = dirIdx === 2 ? 1 : dirIdx === 3 ? -1 : 0;
-  const startOffX = (((seed >>> 8) & 0x7f) / 127 - 0.5) * padHalfW * 0.5;
-  const startOffZ = (((seed >>> 16) & 0x7f) / 127 - 0.5) * padHalfD * 0.5;
+  let s = seed >>> 0;
+  const rng = (): number => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s;
+  };
+
   const steps: PadStep[] = [];
-  for (let i = 0; i < STEP_COUNT; i++) {
-    const stepH = STEP_BASE_H + i * STEP_RISE;
-    const cx = padCX + startOffX + moveDX * i * STEP_SPACING;
-    const cz = padCZ + startOffZ + moveDZ * i * STEP_SPACING;
-    if (
-      Math.abs(cx - padCX) > padHalfW - STEP_HALF_DEPTH ||
-      Math.abs(cz - padCZ) > padHalfD - STEP_HALF_DEPTH
-    ) {
+  let x = padCX + ((rng() & 0xff) / 255 - 0.5) * padHalfW * 0.3;
+  let z = padCZ + ((rng() & 0xff) / 255 - 0.5) * padHalfD * 0.3;
+  let dir = rng() & 3;
+  let cumH = 0;
+  let run = 0;
+
+  for (let i = 0; i < STEP_MAX_N; i++) {
+    const r = rng();
+
+    // Turn 90° after ≥2 steps (~30% chance per step)
+    if (run >= 2 && (r & 0xf) < 5) {
+      dir = (dir + (r & 0x10 ? 1 : 3)) & 3;
+      run = 0;
+    }
+
+    // Flat bridge step (~12% chance after at least one climbing step)
+    const bridge = cumH > 0 && ((r >> 8) & 0xff) < 30;
+    const rise = bridge ? 0 : cumH === 0 ? STEP_FIRST_H : STEP_RISE;
+    const newH = cumH + rise;
+    if (newH > STEP_MAX_H) {
       break;
     }
-    steps.push({
-      cx,
-      cy: padHeight + stepH / 2,
-      cz,
-      hw: moveDX !== 0 ? STEP_HALF_DEPTH : STEP_HALF_WIDTH,
-      hh: stepH / 2,
-      hd: moveDZ !== 0 ? STEP_HALF_DEPTH : STEP_HALF_WIDTH,
-    });
+
+    // Half-extents depend on travel axis
+    const hw = STEP_DX[dir] !== 0 ? STEP_DEPTH / 2 : STEP_WIDTH / 2;
+    const hd = STEP_DZ[dir] !== 0 ? STEP_DEPTH / 2 : STEP_WIDTH / 2;
+
+    const nx = x + STEP_DX[dir] * STEP_DEPTH;
+    const nz = z + STEP_DZ[dir] * STEP_DEPTH;
+
+    // Stay inside pad bounds (1.2-unit margin)
+    if (
+      Math.abs(nx - padCX) + hw > padHalfW - 1.2 ||
+      Math.abs(nz - padCZ) + hd > padHalfD - 1.2
+    ) {
+      dir = (dir + (r & 0x100 ? 1 : 3)) & 3;
+      run = 0;
+      continue;
+    }
+
+    x = nx;
+    z = nz;
+    cumH = newH;
+
+    if (cumH <= 0) {
+      continue;
+    }
+
+    // Block extends from padHeight (bottom) to padHeight + cumH (top)
+    const hh = cumH / 2;
+    steps.push({ cx: x, cy: padHeight + hh, cz: z, hw, hh, hd });
+    run++;
   }
+
   return steps;
 };
 
@@ -103,7 +149,14 @@ const getPadForCell = (cellX: number, cellZ: number): Pad | null => {
   const halfD = 15 + (((h2 >>> 16) & 0xff) / 255) * 25;
   const height = sampleTerrainHeight(centerX, centerZ);
   const steps = computeSteps(centerX, centerZ, height, halfW, halfD, h3);
-  const pad: Pad = { centerX, centerZ, halfW, halfD, height, steps };
+  const topStep =
+    steps.length > 0
+      ? steps.reduce((a, b) => (a.cy + a.hh > b.cy + b.hh ? a : b))
+      : null;
+  const coins: PadCoin[] = topStep
+    ? [{ cx: topStep.cx, cy: topStep.cy + topStep.hh + 1.5, cz: topStep.cz }]
+    : [];
+  const pad: Pad = { centerX, centerZ, halfW, halfD, height, steps, coins };
   padCache.set(key, pad);
   return pad;
 };
@@ -152,3 +205,10 @@ export const sampleGroundHeight = (worldX: number, worldZ: number): number => {
   const pad = getPadAtPoint(worldX, worldZ);
   return pad ? pad.height : sampleTerrainHeight(worldX, worldZ);
 };
+
+export const getCoinsInRegion = (
+  minX: number,
+  minZ: number,
+  maxX: number,
+  maxZ: number,
+): PadCoin[] => getPadsInRegion(minX, minZ, maxX, maxZ).flatMap((p) => p.coins);

@@ -1,4 +1,4 @@
-import { Vec3 } from "./types";
+import { Vec3 } from "../types";
 
 // Lookup table mapping permutation indices to gradient vectors for Perlin noise.
 // 12 vectors point toward the edges/vertices of a cube, giving uniform gradient distribution.
