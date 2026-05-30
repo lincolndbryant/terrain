@@ -3,6 +3,8 @@ import { useThree } from "@react-three/fiber";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
+import { Physics, RigidBody, CapsuleCollider } from "@react-three/rapier";
+import type { RapierRigidBody } from "@react-three/rapier";
 import { Color, Fog, Group, Scene } from "three";
 import { OrbitControls as OrbitControlsBase } from "three-stdlib";
 import {
@@ -21,9 +23,13 @@ import {
   ORBIT_MIN_DISTANCE,
   ORBIT_MIN_POLAR_ANGLE,
 } from "./constants";
+import { sampleGroundHeight } from "./buildingPads";
 
 type OrbitControlsImpl = OrbitControlsBase;
 import Terrain from "./Terrain";
+import PhysicsDebug from "./PhysicsDebug";
+import TerrainCollider from "./TerrainCollider";
+import StepCubes from "./StepCubes";
 import SettingsPanel from "./SettingsPanel";
 import Gizmo from "./characters/Gizmo";
 import GizmoModel from "./characters/GizmoModel";
@@ -145,6 +151,7 @@ const App = () => {
 
 type ActiveCharacterProps = {
   gizmoRef: React.RefObject<Group | null>;
+  bodyRef: React.RefObject<RapierRigidBody | null>;
   movingRef: React.RefObject<boolean>;
   jumpingRef: React.RefObject<boolean>;
   characterId: CharacterId;
@@ -152,12 +159,14 @@ type ActiveCharacterProps = {
 
 const ActiveCharacter = ({
   gizmoRef,
+  bodyRef,
   movingRef,
   jumpingRef,
   characterId,
 }: ActiveCharacterProps) => {
-  if (characterId === "model") {
-    return (
+  const initialY = sampleGroundHeight(0, 0) + 4;
+  const mesh =
+    characterId === "model" ? (
       <Suspense fallback={null}>
         <GizmoModel
           ref={gizmoRef}
@@ -165,9 +174,20 @@ const ActiveCharacter = ({
           jumpingRef={jumpingRef}
         />
       </Suspense>
+    ) : (
+      <Gizmo ref={gizmoRef} movingRef={movingRef} jumpingRef={jumpingRef} />
     );
-  }
-  return <Gizmo ref={gizmoRef} movingRef={movingRef} jumpingRef={jumpingRef} />;
+  return (
+    <RigidBody
+      ref={bodyRef}
+      type="kinematicPosition"
+      colliders={false}
+      position={[0, initialY, 0]}
+    >
+      <CapsuleCollider args={[0.4, 0.25]} position={[0, 0.65, 0]} />
+      {mesh}
+    </RigidBody>
+  );
 };
 
 type TerrainViewProps = {
@@ -181,6 +201,7 @@ const TerrainView = ({ characterId, onCharacterChange }: TerrainViewProps) => {
   const fogRef = useRef<Fog | null>(null);
   const sceneRef = useRef<Scene | null>(null);
   const gizmoRef = useRef<Group | null>(null);
+  const bodyRef = useRef<RapierRigidBody | null>(null);
   const movingRef = useRef(false);
   const jumpingRef = useRef(false);
   const [fogDensity, setFogDensity] = useState(earthStrategy.defaultFogDensity);
@@ -188,6 +209,7 @@ const TerrainView = ({ characterId, onCharacterChange }: TerrainViewProps) => {
     earthStrategy.defaultViewDistance,
   );
   const [strategy, setStrategy] = useState<TerrainStrategy>(earthStrategy);
+  const [debugPhysics, setDebugPhysics] = useState(false);
 
   useEffect(() => {
     if (!fogRef.current) {
@@ -244,19 +266,44 @@ const TerrainView = ({ characterId, onCharacterChange }: TerrainViewProps) => {
           enableKeys={false}
           enablePan={false}
         />
-        <GizmoMovement
-          controlsRef={controlsRef}
-          gizmoRef={gizmoRef}
-          movingRef={movingRef}
-          jumpingRef={jumpingRef}
-        />
-        <ActiveCharacter
-          gizmoRef={gizmoRef}
-          movingRef={movingRef}
-          jumpingRef={jumpingRef}
-          characterId={characterId}
-        />
+        <Suspense fallback={null}>
+          <Physics gravity={[0, -30, 0]}>
+            <GizmoMovement
+              controlsRef={controlsRef}
+              gizmoRef={gizmoRef}
+              bodyRef={bodyRef}
+              movingRef={movingRef}
+              jumpingRef={jumpingRef}
+            />
+            <ActiveCharacter
+              gizmoRef={gizmoRef}
+              bodyRef={bodyRef}
+              movingRef={movingRef}
+              jumpingRef={jumpingRef}
+              characterId={characterId}
+            />
+            <TerrainCollider />
+            <StepCubes />
+            {[-20, 0, 20].flatMap((x) =>
+              [-20, 0, 20].map((z) => (
+                <RigidBody
+                  key={`sphere-${x}-${z}`}
+                  type="dynamic"
+                  position={[x, 30, z]}
+                  restitution={0.3}
+                  friction={0.8}
+                >
+                  <mesh>
+                    <sphereGeometry args={[0.5, 10, 8]} />
+                    <meshStandardMaterial color="#e05050" />
+                  </mesh>
+                </RigidBody>
+              )),
+            )}
+          </Physics>
+        </Suspense>
         <Terrain strategy={strategy} />
+        {debugPhysics && <PhysicsDebug />}
       </Canvas>
 
       <div
@@ -300,6 +347,24 @@ const TerrainView = ({ characterId, onCharacterChange }: TerrainViewProps) => {
             </option>
           ))}
         </SelectField>
+        <button
+          style={{
+            background: debugPhysics
+              ? "rgba(255,180,0,0.55)"
+              : "rgba(0,0,0,0.45)",
+            border: "1px solid rgba(255,255,255,0.18)",
+            color: "rgba(255,255,255,0.82)",
+            fontSize: 12,
+            fontFamily: "monospace",
+            padding: "6px 14px",
+            borderRadius: 8,
+            cursor: "pointer",
+            letterSpacing: "0.04em",
+          }}
+          onClick={() => setDebugPhysics((d) => !d)}
+        >
+          physics debug
+        </button>
         <button
           style={{
             background: "rgba(0,0,0,0.45)",

@@ -31,7 +31,9 @@
       "Bash(pnpm prettier:write *)",
       "Bash(echo \"PID $!\")",
       "Bash(xargs cat *)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }
