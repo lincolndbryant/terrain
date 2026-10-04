@@ -7,4 +7,3 @@
 ## Code style
 
 - No single-line conditionals, always use curly braces
-- Do not make or push any commits, I will do that
