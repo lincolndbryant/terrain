@@ -23,9 +23,25 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @ourizon/playground build
+
+      - name: Build playground
+        run: pnpm --filter @ourizon/playground build
+        env:
+          VITE_BASE_PATH: /terrain/
+
+      - name: Build gizmo-golf
+        run: pnpm --filter @ourizon/gizmo-golf build
+        env:
+          VITE_BASE_PATH: /terrain/golf/
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -r apps/playground/dist/. _site/
+          mkdir -p _site/golf
+          cp -r apps/gizmo-golf/dist/. _site/golf/
 
       - uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./apps/playground/dist
+          publish_dir: ./_site
