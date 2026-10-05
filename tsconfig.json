@@ -11,6 +11,5 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "isolatedModules": true
-  },
-  "include": ["src"]
+  }
 }

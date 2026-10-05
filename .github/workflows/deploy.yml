@@ -13,15 +13,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
 
-      - run: npm ci
-      - run: npm run build
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build playground
+        run: pnpm --filter @ourizon/playground build
+        env:
+          VITE_BASE_PATH: /terrain/
+
+      - name: Build gizmo-golf
+        run: pnpm --filter @ourizon/gizmo-golf build
+        env:
+          VITE_BASE_PATH: /terrain/golf/
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -r apps/playground/dist/. _site/
+          mkdir -p _site/golf
+          cp -r apps/gizmo-golf/dist/. _site/golf/
 
       - uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
+          publish_dir: ./_site
